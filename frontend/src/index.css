@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Dark mode color overrides - Black, Gray, Blue theme */
+@layer utilities {
+  .dark .bg-gray-900 {
+    background-color: #000000; /* Pure black for main background */
+  }
+
+  .dark .bg-gray-800 {
+    background-color: #1a1a1a; /* Very dark gray for cards/panels */
+  }
+
+  .dark .bg-gray-700 {
+    background-color: #2d2d2d; /* Dark gray for hover states */
+  }
+
+  .dark .border-gray-700 {
+    border-color: #333333; /* Dark gray for borders */
+  }
+
+  .dark .border-gray-600 {
+    border-color: #404040; /* Slightly lighter for hover borders */
+  }
+
+  .dark .text-gray-400 {
+    color: #b3b3b3; /* Light gray for secondary text */
+  }
+
+  .dark .text-gray-500 {
+    color: #808080; /* Medium gray for tertiary text */
+  }
+
+  /* Blue accent colors for dark mode */
+  .dark .border-blue-500 {
+    border-color: #3b82f6; /* Blue for accents and active states */
+  }
+
+  .dark .text-blue-400 {
+    color: #60a5fa; /* Lighter blue for better contrast in dark mode */
+  }
+}
+
