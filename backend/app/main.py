@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database.database import db_manager
-from app.api.routes import router
+from app.api.routes import router, api_key_router
 from app.services.screenshot_service import screenshot_service
 
 # Configure logging
@@ -55,6 +55,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(router)
+app.include_router(api_key_router)
 
 
 # Global exception handler

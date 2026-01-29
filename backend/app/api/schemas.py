@@ -72,3 +72,38 @@ class ScreenshotListResponse(BaseModel):
     limit: int
     offset: int
 
+
+# API Key schemas
+class ApiKeyCreateRequest(BaseModel):
+    """Request schema for creating a new API key."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyResponse(BaseModel):
+    """Response schema for API key."""
+    id: int
+    name: str
+    description: Optional[str]
+    key_prefix: str
+    is_active: bool
+    created_at: datetime
+    last_used_at: Optional[datetime]
+    expires_at: Optional[datetime]
+    request_count: int
+    
+    class Config:
+        from_attributes = True
+
+
+class ApiKeyCreateResponse(BaseModel):
+    """Response schema for API key creation."""
+    api_key: ApiKeyResponse
+    key: str  # Plaintext key (only shown once)
+
+
+class ApiKeyListResponse(BaseModel):
+    """Response schema for API key list."""
+    keys: List[ApiKeyResponse]
+

@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     api_port: int = 8000
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     
+    # API Authentication
+    api_auth_enabled: bool = False  # Feature flag to enable/disable auth
+    api_key_required: bool = False  # Require keys for all endpoints (when enabled)
+    api_key_header_name: str = "X-API-Key"
+    api_key_prefix: str = "sk_live_"
+    
     class Config:
         """Pydantic config."""
         env_file = ".env"
