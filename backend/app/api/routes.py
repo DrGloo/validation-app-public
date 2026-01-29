@@ -11,9 +11,16 @@ from app.api.schemas import (
     BatchScreenshotResponse,
     StatisticsResponse,
     ScreenshotListResponse,
+    ApiKeyCreateRequest,
+    ApiKeyCreateResponse,
+    ApiKeyResponse,
+    ApiKeyListResponse,
 )
 from app.services.screenshot_service import ScreenshotService, ScreenshotOptions, ScreenshotResult, screenshot_service
 from app.services.metadata_service import MetadataService
+from app.services.api_key_service import ApiKeyService
+from app.api.dependencies import get_api_key
+from app.database.models import ApiKey
 
 
 router = APIRouter(prefix="/api/v1", tags=["screenshots"])
@@ -39,7 +46,8 @@ async def api_root():
 @router.post("/screenshot", response_model=ScreenshotResponse)
 async def capture_single_screenshot(
     request: SingleScreenshotRequest,
-    db: Session = Depends(db_manager.get_db)
+    db: Session = Depends(db_manager.get_db),
+    api_key: Optional[ApiKey] = Depends(get_api_key)  # Optional authentication
 ):
     """Capture screenshot of a single URL."""
     try:
@@ -76,7 +84,8 @@ async def capture_single_screenshot(
 @router.post("/screenshot/batch", response_model=BatchScreenshotResponse)
 async def capture_batch_screenshots(
     request: BatchScreenshotRequest,
-    db: Session = Depends(db_manager.get_db)
+    db: Session = Depends(db_manager.get_db),
+    api_key: Optional[ApiKey] = Depends(get_api_key)  # Optional authentication
 ):
     """Capture screenshots for multiple URLs."""
     try:
@@ -148,7 +157,8 @@ async def list_screenshots(
     success: Optional[bool] = Query(default=None),
     start_date: Optional[datetime] = Query(default=None),
     end_date: Optional[datetime] = Query(default=None),
-    db: Session = Depends(db_manager.get_db)
+    db: Session = Depends(db_manager.get_db),
+    api_key: Optional[ApiKey] = Depends(get_api_key)  # Optional authentication
 ):
     """List screenshots with optional filters."""
     metadata_service = MetadataService(db)
@@ -174,7 +184,8 @@ async def list_screenshots(
 @router.get("/screenshots/{screenshot_id}", response_model=ScreenshotResponse)
 async def get_screenshot(
     screenshot_id: int,
-    db: Session = Depends(db_manager.get_db)
+    db: Session = Depends(db_manager.get_db),
+    api_key: Optional[ApiKey] = Depends(get_api_key)  # Optional authentication
 ):
     """Get screenshot by ID."""
     metadata_service = MetadataService(db)
@@ -206,7 +217,8 @@ async def get_screenshots_by_url(
 
 @router.get("/statistics", response_model=StatisticsResponse)
 async def get_statistics(
-    db: Session = Depends(db_manager.get_db)
+    db: Session = Depends(db_manager.get_db),
+    api_key: Optional[ApiKey] = Depends(get_api_key)  # Optional authentication
 ):
     """Get screenshot statistics."""
     metadata_service = MetadataService(db)
@@ -227,4 +239,71 @@ async def delete_screenshot(
         raise HTTPException(status_code=404, detail="Screenshot not found")
     
     return {"message": "Screenshot deleted successfully"}
+
+
+# API Key Management Routes
+api_key_router = APIRouter(prefix="/api/v1/api-keys", tags=["api-keys"])
+
+
+@api_key_router.post("", response_model=ApiKeyCreateResponse)
+async def create_api_key(
+    request: ApiKeyCreateRequest,
+    db: Session = Depends(db_manager.get_db)
+):
+    """Create a new API key."""
+    api_key_service = ApiKeyService(db)
+    plaintext_key, api_key = api_key_service.generate_api_key(
+        name=request.name,
+        description=request.description,
+        expires_at=request.expires_at
+    )
+    
+    return ApiKeyCreateResponse(
+        api_key=ApiKeyResponse(**api_key.to_dict()),
+        key=plaintext_key  # Only time plaintext is returned
+    )
+
+
+@api_key_router.get("", response_model=ApiKeyListResponse)
+async def list_api_keys(
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(db_manager.get_db)
+):
+    """List all API keys."""
+    api_key_service = ApiKeyService(db)
+    keys = api_key_service.list_api_keys(include_inactive=include_inactive)
+    
+    return ApiKeyListResponse(
+        keys=[ApiKeyResponse(**key.to_dict()) for key in keys]
+    )
+
+
+@api_key_router.delete("/{key_id}")
+async def revoke_api_key(
+    key_id: int,
+    db: Session = Depends(db_manager.get_db)
+):
+    """Revoke an API key."""
+    api_key_service = ApiKeyService(db)
+    success = api_key_service.revoke_api_key(key_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    return {"message": "API key revoked successfully"}
+
+
+@api_key_router.post("/{key_id}/reactivate")
+async def reactivate_api_key(
+    key_id: int,
+    db: Session = Depends(db_manager.get_db)
+):
+    """Reactivate a revoked API key."""
+    api_key_service = ApiKeyService(db)
+    success = api_key_service.reactivate_api_key(key_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    return {"message": "API key reactivated successfully"}
 

@@ -64,6 +64,34 @@ export interface StatisticsResponse {
   success_rate: number
 }
 
+// API Key interfaces
+export interface ApiKeyResponse {
+  id: number
+  name: string
+  description?: string
+  key_prefix: string
+  is_active: boolean
+  created_at: string
+  last_used_at?: string
+  expires_at?: string
+  request_count: number
+}
+
+export interface ApiKeyCreateRequest {
+  name: string
+  description?: string
+  expires_at?: string
+}
+
+export interface ApiKeyCreateResponse {
+  api_key: ApiKeyResponse
+  key: string  // Plaintext key (only shown once)
+}
+
+export interface ApiKeyListResponse {
+  keys: ApiKeyResponse[]
+}
+
 class ApiService {
   private client = axios.create({
     baseURL: API_BASE_URL,
@@ -130,6 +158,27 @@ class ApiService {
 
   async deleteScreenshot(id: number): Promise<void> {
     await this.client.delete(`/screenshots/${id}`)
+  }
+
+  // API Key management methods
+  async createApiKey(request: ApiKeyCreateRequest): Promise<ApiKeyCreateResponse> {
+    const response = await this.client.post<ApiKeyCreateResponse>('/api-keys', request)
+    return response.data
+  }
+
+  async listApiKeys(includeInactive?: boolean): Promise<ApiKeyListResponse> {
+    const response = await this.client.get<ApiKeyListResponse>('/api-keys', {
+      params: { include_inactive: includeInactive },
+    })
+    return response.data
+  }
+
+  async revokeApiKey(keyId: number): Promise<void> {
+    await this.client.delete(`/api-keys/${keyId}`)
+  }
+
+  async reactivateApiKey(keyId: number): Promise<void> {
+    await this.client.post(`/api-keys/${keyId}/reactivate`)
   }
 }
 
