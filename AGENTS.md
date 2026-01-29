@@ -20,13 +20,15 @@ validation-app/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── routes.py          # FastAPI endpoints
-│   │   │   └── schemas.py         # Pydantic request/response models
+│   │   │   ├── schemas.py         # Pydantic request/response models
+│   │   │   └── dependencies.py    # Authentication dependencies
 │   │   ├── database/
 │   │   │   ├── models.py          # SQLAlchemy models
 │   │   │   └── database.py        # Database connection & session management
 │   │   ├── services/
 │   │   │   ├── screenshot_service.py    # Playwright screenshot logic
-│   │   │   └── metadata_service.py       # Database CRUD operations
+│   │   │   ├── metadata_service.py       # Database CRUD operations
+│   │   │   └── api_key_service.py        # API key generation & validation
 │   │   ├── config.py              # Application settings (Pydantic)
 │   │   └── main.py                # FastAPI app initialization
 │   ├── requirements.txt
@@ -48,15 +50,23 @@ validation-app/
 1. **Service Layer Pattern**: Business logic separated from API routes
    - `ScreenshotService`: Handles Playwright browser automation
    - `MetadataService`: Handles database operations
+   - `ApiKeyService`: Handles API key generation, validation, and management
    - Routes delegate to services, services handle business logic
 
-2. **Dependency Injection**: FastAPI's `Depends()` for database sessions
+2. **Dependency Injection**: FastAPI's `Depends()` for database sessions and authentication
    - `db_manager.get_db()` provides database sessions
+   - `get_api_key()` provides optional API key authentication
+   - `require_api_key()` provides required API key authentication
    - Services receive sessions as constructor parameters
 
 3. **Repository Pattern**: `MetadataService` acts as repository for screenshot data
 
 4. **Singleton Pattern**: Global instances for `screenshot_service` and `db_manager`
+
+5. **Authentication Pattern**: Optional API key authentication via dependencies
+   - Keys stored as bcrypt hashes (never plaintext)
+   - Authentication optional by default (frontend works without keys)
+   - Can be required per endpoint using `require_api_key` dependency
 
 ### Frontend Architecture
 
@@ -86,21 +96,55 @@ validation-app/
   - `get_statistics()`: Aggregate stats (total, successful, failed, success_rate)
 - **Note**: Uses SQLAlchemy ORM, receives Session from FastAPI dependency
 
+#### `ApiKeyService` (`backend/app/services/api_key_service.py`)
+- **Purpose**: API key generation, validation, and management
+- **Key Methods**:
+  - `generate_api_key()`: Create new key with bcrypt hashing, returns plaintext key (shown once)
+  - `validate_api_key()`: Verify key hash, check expiration and active status
+  - `update_last_used()`: Track usage (last_used_at, request_count)
+  - `revoke_api_key()`: Soft delete via is_active flag
+  - `reactivate_api_key()`: Reactivate revoked key
+- **Security**: Uses bcrypt with cost factor 12, never stores plaintext keys
+- **Note**: Receives Session from FastAPI dependency
+
 #### Database Models (`backend/app/database/models.py`)
 - **ScreenshotMetadata**: Main model storing:
   - URL, timestamp, viewport dimensions
   - File path, base64_data (for frontend display)
   - HTTP status, load time, error messages
   - Success/failure status
+- **ApiKey**: Model for API key authentication:
+  - key_hash: Bcrypt hash (never plaintext)
+  - key_prefix: Display prefix (e.g., "sk_live_abc")
+  - is_active: Soft delete flag
+  - Usage tracking: last_used_at, request_count
+  - Optional expiration: expires_at
 
 #### API Routes (`backend/app/api/routes.py`)
-- **Endpoints**:
-  - `POST /api/v1/screenshot`: Single screenshot capture
-  - `POST /api/v1/screenshot/batch`: Batch capture (up to 100 URLs)
-  - `GET /api/v1/screenshots`: List with filters
-  - `GET /api/v1/screenshots/{id}`: Get by ID
-  - `GET /api/v1/statistics`: Get aggregate statistics
+- **Screenshot Endpoints**:
+  - `POST /api/v1/screenshot`: Single screenshot capture (optional API key auth)
+  - `POST /api/v1/screenshot/batch`: Batch capture (up to 100 URLs, optional auth)
+  - `GET /api/v1/screenshots`: List with filters (optional auth)
+  - `GET /api/v1/screenshots/{id}`: Get by ID (optional auth)
+  - `GET /api/v1/statistics`: Get aggregate statistics (optional auth)
   - `DELETE /api/v1/screenshots/{id}`: Delete screenshot
+- **API Key Management Endpoints**:
+  - `POST /api/v1/api-keys`: Create new API key
+  - `GET /api/v1/api-keys`: List all API keys
+  - `DELETE /api/v1/api-keys/{id}`: Revoke API key
+  - `POST /api/v1/api-keys/{id}/reactivate`: Reactivate revoked key
+
+#### Authentication Dependencies (`backend/app/api/dependencies.py`)
+- **get_api_key()**: Optional authentication dependency
+  - Extracts `X-API-Key` header
+  - Validates key via `ApiKeyService`
+  - Updates usage tracking
+  - Returns `ApiKey` object or `None` if no key provided
+  - Raises 401 if invalid key provided
+- **require_api_key()**: Required authentication dependency
+  - Uses `get_api_key()` internally
+  - Raises 401 if no key provided
+  - Returns `ApiKey` object
 
 ### Frontend Components
 
@@ -157,6 +201,29 @@ def get_db(self) -> Generator[Session, None, None]:
         session.close()
 ```
 
+### API Key Authentication
+
+**Pattern**: Optional authentication via FastAPI dependencies
+- **Optional Auth**: Use `api_key: Optional[ApiKey] = Depends(get_api_key)`
+  - Returns `None` if no key provided (frontend continues to work)
+  - Returns `ApiKey` object if valid key provided
+  - Raises 401 if invalid key provided
+- **Required Auth**: Use `api_key: ApiKey = Depends(require_api_key)`
+  - Raises 401 if no key or invalid key provided
+  - Returns `ApiKey` object if valid
+
+**Key Generation**:
+- Format: `sk_live_{32-byte-random-token}`
+- Uses `secrets.token_urlsafe(32)` for secure generation
+- Hashed with bcrypt (cost factor 12)
+- Plaintext key shown only once on creation
+
+**Key Validation**:
+- Compares bcrypt hash of provided key against stored hashes
+- Checks `is_active` flag (revoked keys return 401)
+- Checks `expires_at` if set (expired keys return 401)
+- Updates `last_used_at` and `request_count` on successful validation
+
 ### Screenshot Service Lifecycle
 
 1. **Startup**: `lifespan()` in `main.py` calls `screenshot_service.initialize()`
@@ -177,6 +244,11 @@ def get_db(self) -> Generator[Session, None, None]:
 - **Playwright**: Headless mode, 30s timeout default
 - **CORS**: Allows `http://localhost:3000` and `http://localhost:5173`
 - **API**: Runs on `0.0.0.0:8000`
+- **API Authentication**:
+  - `api_auth_enabled`: Feature flag (default: False)
+  - `api_key_required`: Require keys for all endpoints (default: False)
+  - `api_key_header_name`: Header name (default: "X-API-Key")
+  - `api_key_prefix`: Key prefix (default: "sk_live_")
 
 ### Frontend Config (`frontend/vite.config.ts`)
 - **Dev Server**: Port 3000
@@ -290,8 +362,51 @@ Response: {
 }
 ```
 
+### API Key Management
+
+#### Create API Key
+```http
+POST /api/v1/api-keys
+Content-Type: application/json
+
+{
+  "name": "Production API Key",
+  "description": "For production monitoring",
+  "expires_at": null
+}
+
+Response: {
+  "api_key": {
+    "id": 1,
+    "name": "Production API Key",
+    "key_prefix": "sk_live_abc",
+    "is_active": true,
+    "created_at": "2026-01-28T10:00:00",
+    "request_count": 0
+  },
+  "key": "sk_live_abc123xyz..."  # Plaintext key (shown only once!)
+}
+```
+
+#### List API Keys
+```http
+GET /api/v1/api-keys?include_inactive=false
+```
+
+#### Using API Key
+```http
+POST /api/v1/screenshot
+X-API-Key: sk_live_abc123xyz...
+Content-Type: application/json
+
+{
+  "url": "https://example.com"
+}
+```
+
 ## Database Schema
 
+### Screenshots Table
 ```sql
 CREATE TABLE screenshots (
     id INTEGER PRIMARY KEY,
@@ -307,6 +422,22 @@ CREATE TABLE screenshots (
     wait_strategy TEXT,
     error_message TEXT,
     success BOOLEAN DEFAULT 1
+);
+```
+
+### API Keys Table
+```sql
+CREATE TABLE api_keys (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    key_hash TEXT NOT NULL UNIQUE,  -- Bcrypt hash (never plaintext)
+    key_prefix TEXT NOT NULL,        -- Display prefix (e.g., "sk_live_abc")
+    is_active BOOLEAN DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    last_used_at DATETIME,
+    expires_at DATETIME,             -- Optional expiration
+    request_count INTEGER DEFAULT 0
 );
 ```
 
@@ -373,6 +504,8 @@ CREATE TABLE screenshots (
 - **Add new component**: `frontend/src/components/`
 - **Change configuration**: `backend/app/config.py` or `.env` file
 - **Update CORS**: `backend/app/config.py` → `cors_origins`
+- **Add authentication**: Use `get_api_key` or `require_api_key` from `backend/app/api/dependencies.py`
+- **Manage API keys**: Use `ApiKeyService` from `backend/app/services/api_key_service.py`
 
 ## Important Notes for AI Assistants
 
@@ -386,6 +519,9 @@ CREATE TABLE screenshots (
 8. **URL normalization** - Always ensure URLs have protocol (https://)
 9. **CORS** - Use proxy in development, direct URL in production
 10. **Python version** - Recommend Python 3.11 or 3.12, not 3.14
+11. **API key authentication** - Optional by default, use `get_api_key` for optional auth, `require_api_key` for required auth
+12. **API key security** - Never store plaintext keys, always use bcrypt hashing, show key only once on creation
+13. **API key validation** - Updates usage tracking automatically on successful validation
 
 ## Quick Reference
 
@@ -395,7 +531,9 @@ from app.config import settings
 from app.database.database import db_manager
 from app.services.screenshot_service import ScreenshotService, ScreenshotOptions, screenshot_service
 from app.services.metadata_service import MetadataService
-from app.database.models import ScreenshotMetadata
+from app.services.api_key_service import ApiKeyService
+from app.database.models import ScreenshotMetadata, ApiKey
+from app.api.dependencies import get_api_key, require_api_key
 ```
 
 ### Frontend Imports
@@ -407,9 +545,12 @@ import toast from 'react-hot-toast'
 
 ### Common Patterns
 - **API Route**: Use `Depends(db_manager.get_db)` for database session
+- **Optional Auth**: Use `api_key: Optional[ApiKey] = Depends(get_api_key)` for optional authentication
+- **Required Auth**: Use `api_key: ApiKey = Depends(require_api_key)` for required authentication
 - **Service Method**: Receive `Session` in constructor, use `self.db`
 - **React Component**: Use hooks (`useState`, `useQuery`, `useMutation`)
 - **Error Display**: Use `toast.error()` for user notifications
+- **API Key Creation**: Always return plaintext key only once, never store it
 
 ## Environment Variables
 
@@ -420,6 +561,10 @@ DATABASE_URL=sqlite:///./screenshots.db
 SCREENSHOTS_DIR=./screenshots
 API_HOST=0.0.0.0
 API_PORT=8000
+API_AUTH_ENABLED=false
+API_KEY_REQUIRED=false
+API_KEY_HEADER_NAME=X-API-Key
+API_KEY_PREFIX=sk_live_
 ```
 
 ### Frontend (.env)
@@ -437,9 +582,12 @@ VITE_API_URL=http://localhost:8000/api/v1
 | "Please Enter a URL" | Browser validation | Use text input, auto-add https:// |
 | Database errors | Session issue | Check `get_db()` is generator |
 | Python 3.14 errors | Compatibility | Use Python 3.11 or 3.12 |
+| "401 Unauthorized" | Invalid API key | Check key format, verify key is active and not expired |
+| "Invalid or inactive API key" | Key validation failed | Verify key hash matches, check is_active flag |
+| API key not found | Key doesn't exist | Check key ID, verify key wasn't deleted |
 
 ---
 
-**Last Updated**: Based on current codebase state
-**Maintainer Notes**: Keep this file updated when making significant architectural changes
+**Last Updated**: January 2026 (Added API Key Authentication)
+**Maintainer Notes**: Keep this file updated when making significant architectural changes. API key authentication added for programmatic access support.
 
