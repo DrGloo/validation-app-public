@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { apiService } from '../services/api'
 import ScreenshotCard from '../components/ScreenshotCard'
+
+const REPORT_EXPORT_LIMIT = 50
 
 export default function History() {
   const [urlFilter, setUrlFilter] = useState('')
   const [successFilter, setSuccessFilter] = useState<boolean | undefined>(undefined)
   const [limit, setLimit] = useState(50)
   const [offset, setOffset] = useState(0)
+  const [exportLoading, setExportLoading] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['screenshots', 'history', urlFilter, successFilter, limit, offset],
@@ -19,6 +23,34 @@ export default function History() {
     }),
   })
 
+  async function handleExportReport(format: 'html' | 'pdf' = 'html') {
+    setExportLoading(true)
+    try {
+      const blob = await apiService.exportReport({
+        format,
+        url: urlFilter || undefined,
+        success: successFilter,
+        limit: REPORT_EXPORT_LIMIT,
+      })
+      const url = URL.createObjectURL(blob)
+      const ext = format === 'pdf' ? 'pdf' : 'html'
+      const filename = `screenshot-report-${new Date().toISOString().slice(0, 10)}.${ext}`
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Report downloaded')
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+        : null
+      toast.error(msg || 'Export failed')
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
   return (
     <div className="px-4 sm:px-6 lg:px-8">
       <div className="mb-6">
@@ -29,7 +61,8 @@ export default function History() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6 transition-colors">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 flex-1 min-w-0">
           <div>
             <label htmlFor="urlFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Filter by URL
@@ -83,6 +116,15 @@ export default function History() {
               <option value="100">100</option>
             </select>
           </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleExportReport('html')}
+            disabled={exportLoading}
+            className="px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {exportLoading ? 'Exporting…' : 'Export report'}
+          </button>
         </div>
       </div>
 

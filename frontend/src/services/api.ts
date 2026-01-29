@@ -156,6 +156,29 @@ class ApiService {
     return response.data
   }
 
+  /** Export report as HTML or PDF (HTML only supported in MVP). Returns blob for download. */
+  async exportReport(params: {
+    format: 'html' | 'pdf'
+    start_date?: string
+    end_date?: string
+    url?: string
+    success?: boolean
+    limit?: number
+  }): Promise<Blob> {
+    const response = await this.client.get('/reports/export', {
+      params: {
+        format: params.format,
+        start_date: params.start_date,
+        end_date: params.end_date,
+        url: params.url,
+        success: params.success,
+        limit: params.limit ?? 50,
+      },
+      responseType: 'blob',
+    })
+    return response.data
+  }
+
   async deleteScreenshot(id: number): Promise<void> {
     await this.client.delete(`/screenshots/${id}`)
   }

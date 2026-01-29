@@ -1,5 +1,6 @@
 """FastAPI routes for screenshot API."""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
@@ -19,6 +20,7 @@ from app.api.schemas import (
 from app.services.screenshot_service import ScreenshotService, ScreenshotOptions, ScreenshotResult, screenshot_service
 from app.services.metadata_service import MetadataService
 from app.services.api_key_service import ApiKeyService
+from app.services.report_service import ReportService
 from app.api.dependencies import get_api_key
 from app.database.models import ApiKey
 
@@ -239,6 +241,75 @@ async def delete_screenshot(
         raise HTTPException(status_code=404, detail="Screenshot not found")
     
     return {"message": "Screenshot deleted successfully"}
+
+
+# Report export
+REPORT_LIMIT_DEFAULT = 50
+REPORT_LIMIT_MAX = 100
+
+
+@router.get("/reports/export")
+async def export_report(
+    format: str = Query(default="html", pattern="^(html|pdf)$"),
+    start_date: Optional[datetime] = Query(default=None),
+    end_date: Optional[datetime] = Query(default=None),
+    url: Optional[str] = Query(default=None),
+    success: Optional[bool] = Query(default=None),
+    limit: int = Query(default=REPORT_LIMIT_DEFAULT, ge=1, le=REPORT_LIMIT_MAX),
+    db: Session = Depends(db_manager.get_db),
+    api_key: Optional[ApiKey] = Depends(get_api_key),
+):
+    """Export a set of screenshots as HTML or PDF report."""
+    if format != "html":
+        raise HTTPException(
+            status_code=400,
+            detail="Only HTML format is supported. Use format=html.",
+        )
+    metadata_service = MetadataService(db)
+    screenshots = metadata_service.get_screenshots(
+        limit=limit,
+        offset=0,
+        url_filter=url,
+        success_filter=success,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    total = len(screenshots)
+    successful = sum(1 for s in screenshots if s.success)
+    failed = total - successful
+    success_rate = (successful / total * 100.0) if total > 0 else 0.0
+    summary_stats = {
+        "total": total,
+        "successful": successful,
+        "failed": failed,
+        "success_rate": success_rate,
+    }
+    parts = []
+    if start_date:
+        parts.append(f"From {start_date.isoformat()}")
+    if end_date:
+        parts.append(f"To {end_date.isoformat()}")
+    if url:
+        parts.append(f"URL contains: {url}")
+    if success is not None:
+        parts.append("Status: " + ("success" if success else "failed"))
+    filter_summary = "; ".join(parts) if parts else "No filters"
+    screenshot_dicts = [s.to_dict() for s in screenshots]
+    report_service = ReportService()
+    context = report_service.build_report_context(
+        screenshot_dicts, filter_summary, summary_stats
+    )
+    html_content = report_service.render_html(context)
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    filename = f"screenshot-report-{date_str}.html"
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # API Key Management Routes

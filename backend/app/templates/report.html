@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; color: #1f2937; line-height: 1.5; }
+    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    .meta { color: #6b7280; font-size: 0.875rem; margin-bottom: 24px; }
+    .summary { border-collapse: collapse; margin-bottom: 32px; }
+    .summary th, .summary td { border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; }
+    .summary th { background: #f9fafb; font-weight: 600; }
+    .screenshot { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 24px; max-width: 100%; }
+    .screenshot h3 { font-size: 0.875rem; margin: 0 0 8px 0; word-break: break-all; }
+    .screenshot .details { font-size: 0.75rem; color: #6b7280; margin-bottom: 8px; }
+    .screenshot img { max-width: 100%; height: auto; display: block; border: 1px solid #e5e7eb; }
+    .success { color: #059669; }
+    .failed { color: #dc2626; }
+    .error-msg { background: #fef2f2; color: #991b1b; padding: 8px; border-radius: 4px; font-size: 0.875rem; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <p class="meta">Generated: {{ generated_at }}</p>
+  {% if filter_summary %}
+  <p class="meta">Filters: {{ filter_summary }}</p>
+  {% endif %}
+
+  <table class="summary">
+    <tr><th>Total</th><td>{{ total }}</td></tr>
+    <tr><th>Successful</th><td>{{ successful }}</td></tr>
+    <tr><th>Failed</th><td>{{ failed }}</td></tr>
+    <tr><th>Success rate</th><td>{{ "%.1f"|format(success_rate) }}%</td></tr>
+  </table>
+
+  {% for s in screenshots %}
+  <div class="screenshot">
+    <h3>{{ s.url }}</h3>
+    <div class="details">
+      <span class="{{ 'success' if s.success else 'failed' }}">{{ 'Success' if s.success else 'Failed' }}</span>
+      &middot; {{ s.timestamp }}
+      {% if s.http_status_code %} &middot; HTTP {{ s.http_status_code }}{% endif %}
+      {% if s.page_load_time_ms is not none %} &middot; {{ "%.0f"|format(s.page_load_time_ms) }} ms{% endif %}
+      &middot; {{ s.viewport_width }}&times;{{ s.viewport_height }}
+    </div>
+    {% if s.base64_data %}
+    <img src="data:image/png;base64,{{ s.base64_data }}" alt="{{ s.url }}" loading="lazy" />
+    {% else %}
+    <p class="meta">No image data</p>
+    {% endif %}
+    {% if s.error_message %}
+    <div class="error-msg">{{ s.error_message }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</body>
+</html>
